@@ -17,6 +17,7 @@ Spam or Ham? classifies the text of an email or SMS message as `spam` or `ham` (
 | [backend/app/](backend/app/) | FastAPI endpoint, request validation, and model loading. |
 | [backend/benchmarks/benchmark_api.py](backend/benchmarks/benchmark_api.py) | Measures prediction latency, throughput, and errors against a running API. |
 | [ml/preprocess.py](ml/preprocess.py) | Cleans the email and SMS datasets and produces training and test CSVs. |
+| [ml/train.py](ml/train.py) | Trains and exports the selected model from local CSVs or S3. |
 | [ml/notebooks/exploration.ipynb](ml/notebooks/exploration.ipynb) | Explores class balance, message lengths, vocabulary, and differences between email and SMS. |
 | [ml/notebooks/model_training.ipynb](ml/notebooks/model_training.ipynb) | Compares models, evaluates the selected pipeline, and exports the model. |
 | `ml/data/raw/`, `ml/data/processed/`, `ml/artifacts/` | Local input datasets, processed splits, and the generated model file. |
@@ -91,6 +92,8 @@ A successful response returns HTTP 200 and a JSON object with one field, `label`
 
 Missing fields, unsupported source values, and blank messages produce an HTTP 422 validation error.
 
+`GET /health` returns HTTP 200 with `{"status":"ok"}` once the API has loaded the model and is accepting requests.
+
 ## Train the model
 
 ### 1. Prepare the input data
@@ -104,11 +107,11 @@ Place two labeled CSVs in `ml/data/raw/`. Both datasets use `ham` and `spam` as 
 
 ### 2. Preprocess and split the data
 
-From the repository root, create an ML environment and run the preprocessing script. The backend requirements constrain the versions shared by training and serving.
+From the repository root, create an ML environment and run the preprocessing script. The ML requirements pin the same model dependencies as the backend.
 
 ```powershell
 py -3.13 -m venv ml/.venv
-.\ml\.venv\Scripts\python.exe -m pip install -r ml/requirements.txt -c backend/requirements.txt jupyterlab
+.\ml\.venv\Scripts\python.exe -m pip install -r ml/requirements.txt jupyterlab
 .\ml\.venv\Scripts\python.exe ml/preprocess.py
 ```
 
@@ -136,6 +139,16 @@ The saved [training notebook](ml/notebooks/model_training.ipynb) reports the fol
 | Spam recall | 94.55% |
 | Spam F1 | 95.86% |
 
+### Train from the command line
+
+With the dependencies and raw CSVs in place, run this command from the repository root.
+
+```powershell
+.\ml\.venv\Scripts\python.exe ml/train.py
+```
+
+The script cleans and splits the raw CSVs, fits the linear SVM with the notebook's selected settings (`C=300`), prints held-out metrics, and saves the model to `ml/artifacts/spam_classifier_linear_svm.joblib`. Use `--raw-data-dir` or `--model-path` to change the local paths.
+
 ## Build and benchmark
 
 From `frontend/`, run `npm run lint` to check the source and `npm run build` to generate the static frontend in `frontend/dist/`. When serving that build, route `/predict` on the frontend's origin to the FastAPI backend. The Vite development proxy is configured in [frontend/vite.config.js](frontend/vite.config.js).
@@ -160,11 +173,41 @@ docker run --rm -p 8000:8000 --mount "type=bind,source=$artifacts,target=/models
 
 The container serves the API on port 8000 and loads `/models/spam_classifier_linear_svm.joblib`. Start the frontend separately using the local instructions above. The [ML Dockerfile](ml/Dockerfile) provides a separate JupyterLab environment for the notebooks.
 
+## Deploy the API to AWS
+
+From the repository root, build the backend's `deploy` target. This copies the saved model from `ml/artifacts/` into the image.
+
+```powershell
+docker buildx build --load --platform linux/amd64 --target deploy --build-context model=./ml/artifacts -t spam-classifier-api:deploy ./backend
+docker run --rm -p 8000:8000 spam-classifier-api:deploy
+```
+
+In another terminal, check `http://127.0.0.1:8000/health` and try the prediction request above. Push the image to Amazon ECR and select it when you create an ECS Express Mode service. Set the container port to `8000` and the health check path to `/health`. When you have a new model, rebuild and publish the backend image with a new tag and update the service to use it. [Push an image to Amazon ECR](https://docs.aws.amazon.com/AmazonECR/latest/userguide/image-push.html) · [Create an ECS Express Mode service](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-first-run.html)
+
+### Run ML training as an AWS job
+
+Build the separate training image and push it to ECR.
+
+```powershell
+docker buildx build --load --platform linux/amd64 --target training -t spam-classifier-training ./ml
+```
+
+Put both raw CSVs under the same private S3 prefix. Create an ECS Fargate task definition using the training image, then set its container command to the following JSON array, replacing the example S3 locations with your own.
+
+```json
+[
+  "--s3-input", "s3://my-training-bucket/raw/",
+  "--s3-output", "s3://my-training-bucket/models/run-001/spam_classifier_linear_svm.joblib"
+]
+```
+
+Give the task role permission to read the two input objects and write the output object. Run the task when you want a new model. It exits after uploading the artifact. To promote the model, download it to `ml/artifacts/`, then build and deploy a new backend image using the commands above. [Run an ECS standalone task](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/standalone-task-create.html) · [ECS task role permissions](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-iam-roles.html)
+
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
-| The API fails to start with `Model file not found`. | Check the default artifact path or the `MODEL_PATH` value. For Docker, verify the model is inside the directory mounted at `/models`. |
+| The API fails to start with `Model file not found`. | Check the default artifact path or `MODEL_PATH`. For Docker, check the `/models` mount or build the `deploy` target with the artifact in its build context. |
 | The API fails to load the model. | Check that training and serving use the pinned versions of scikit-learn, NumPy, SciPy, pandas, and Joblib from `backend/requirements.txt`. |
 | The browser shows a prediction error. | Verify the API is listening on port 8000 and that `POST /predict` works in FastAPI's interactive docs. |
 | Preprocessing cannot read an input. | Check both CSV filenames, column names, and encodings against the table above. |

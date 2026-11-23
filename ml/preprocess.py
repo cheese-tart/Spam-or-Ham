@@ -6,12 +6,14 @@ from sklearn.model_selection import GroupShuffleSplit
 BASE_DIR = Path(__file__).resolve().parent
 RAW_DATA_DIR = BASE_DIR / "data" / "raw"
 PROCESSED_DATA_DIR = BASE_DIR / "data" / "processed"
+EMAIL_FILENAME = "spam_ham_email.csv"
+SMS_FILENAME = "spam_ham_sms.csv"
 
 
-def load_data():
+def load_data(raw_data_dir=RAW_DATA_DIR):
     ''' Load and standardize the email and SMS datasets.'''
-    email = pd.read_csv(RAW_DATA_DIR / "spam_ham_email.csv")
-    sms = pd.read_csv(RAW_DATA_DIR / "spam_ham_sms.csv", encoding='latin-1')
+    email = pd.read_csv(raw_data_dir / EMAIL_FILENAME)
+    sms = pd.read_csv(raw_data_dir / SMS_FILENAME, encoding='latin-1')
 
     # Standardize email dataset
     email = email[['text', 'label']].copy()
@@ -93,6 +95,17 @@ def save_data(train_df, test_df):
     )
 
 
+def validate_splits(train_df, test_df):
+    if set(train_df["text"]) & set(test_df["text"]):
+        raise ValueError("Identical message text appears in both splits.")
+
+    for name, dataset in (("Training", train_df), ("Test", test_df)):
+        if set(dataset["label"]) != {"ham", "spam"}:
+            raise ValueError(f"{name} split must contain both ham and spam labels.")
+        if set(dataset["source"]) != {"email", "sms"}:
+            raise ValueError(f"{name} split must contain both email and SMS messages.")
+
+
 def main():
     df = load_data()
 
@@ -117,18 +130,7 @@ def main():
     test_ratio = len(test_df) / len(df)
     print(f"\nActual test proportion: {test_ratio:.2%}")
 
-    # Verify no identical text appears in both datasets
-    overlap = set(train_df["text"]) & set(test_df["text"])
-    assert len(overlap) == 0, "Data leakage detected!"
-
-    # Verify both datasets contain valid labels and sources
-    assert set(df["label"]) == {"ham", "spam"}
-    assert set(df["source"]) == {"email", "sms"}
-
-    # Check both train and test sets
-    for dataset in [train_df, test_df]:
-        assert set(dataset["label"]) == {"ham", "spam"}
-        assert set(dataset["source"]) == {"email", "sms"}
+    validate_splits(train_df, test_df)
 
     save_data(train_df, test_df)
 

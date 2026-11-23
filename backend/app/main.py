@@ -16,6 +16,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(title="Spam Classifier", lifespan=lifespan)
 
 
+@app.get("/health")
+def health() -> dict[str, str]:
+    # FastAPI starts serving requests after the model loads in lifespan.
+    return {"status": "ok"}
+
+
 @app.post("/predict", response_model=PredictionResponse)
 def predict(payload: PredictionRequest, request: Request) -> dict[str, str]:
     label = predict_label(request.app.state.pipeline, payload.text, payload.source)
