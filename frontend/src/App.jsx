@@ -1,121 +1,137 @@
 import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
 import './App.css'
 
+const messageTypes = [
+  { value: 'sms', label: 'SMS' },
+  { value: 'email', label: 'Email' },
+]
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [message, setMessage] = useState('')
+  const [source, setSource] = useState('sms')
+  const [prediction, setPrediction] = useState(null)
+  const [error, setError] = useState('')
+  const [isChecking, setIsChecking] = useState(false)
+
+  function clearFeedback() {
+    setPrediction(null)
+    setError('')
+  }
+
+  async function checkMessage(event) {
+    event.preventDefault()
+    if (isChecking || !message.trim()) return
+
+    clearFeedback()
+    setIsChecking(true)
+
+    try {
+      const response = await fetch('/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: message, source }),
+      })
+
+      if (!response.ok) throw new Error('Prediction request failed')
+
+      const { label } = await response.json()
+      if (label !== 'spam' && label !== 'ham') throw new Error('Invalid prediction')
+      setPrediction(label)
+    } catch {
+      setError('Couldn’t check this message. Please try again.')
+    } finally {
+      setIsChecking(false)
+    }
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="page">
+      <header className="site-header">
+        <span className="brand-mark" aria-hidden="true"><i /></span>
+        <span>Spam or Ham?</span>
+      </header>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+      <main className="workspace">
+        <div className="intro">
+          <h1>Spam or <span>Ham?</span></h1>
+          <p>Paste an SMS or email to see if it’s likely spam.</p>
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+        <form className="checker" onSubmit={checkMessage} aria-label="Message checker">
+          <fieldset className="source-field" disabled={isChecking}>
+            <legend>Message type</legend>
+            <div className="source-options">
+              {messageTypes.map(({ value, label }) => (
+                <label className="source-option" key={value}>
+                  <input
+                    type="radio"
+                    name="source"
+                    value={value}
+                    checked={source === value}
+                    onChange={() => {
+                      setSource(value)
+                      clearFeedback()
+                    }}
+                  />
+                  <span className={`source-icon source-icon--${value}`} aria-hidden="true" />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="message-field">
+            <label htmlFor="message">Message text</label>
+            <div className="text-box">
+              <textarea
+                id="message"
+                placeholder="Type or paste your message here…"
+                value={message}
+                readOnly={isChecking}
+                required
+                onChange={(event) => {
+                  setMessage(event.target.value)
+                  clearFeedback()
+                }}
+              />
+              <div className="text-tools">
+                <span>{message.length.toLocaleString()} characters</span>
+                <button
+                  className="clear-button"
+                  type="button"
+                  disabled={!message || isChecking}
+                  onClick={() => {
+                    setMessage('')
+                    clearFeedback()
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <button className="submit-button" disabled={!message.trim() || isChecking}>
+            {isChecking ? 'Checking…' : 'Check for spam'}
+          </button>
+
+          <div role="status">
+            {prediction && (
+              <div className={`feedback feedback--${prediction}`}>
+                <strong>Prediction</strong>
+                <span>{prediction === 'spam' ? 'Likely spam' : 'Likely ham'}</span>
+              </div>
+            )}
+          </div>
+          {error && <p className="feedback feedback--error" role="alert">{error}</p>}
+        </form>
+
+        <footer className="disclaimer">
+          <span className="info-icon" aria-hidden="true">i</span>
+          <p>This is only a prediction. It can be wrong, so don’t rely on it alone. Verify suspicious messages independently.</p>
+        </footer>
+      </main>
+    </div>
   )
 }
 
