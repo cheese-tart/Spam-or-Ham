@@ -1,0 +1,10 @@
+{
+    "folders": [
+        { "path": "backend" },
+        { "path": "ml" },
+        { "path": "frontend" }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv"
+    }
+}
